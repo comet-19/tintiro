@@ -146,6 +146,12 @@ export default function LobbyPage() {
               <p className="text-yellow-400 text-xs font-mono">{formatMoney(profile.money)}</p>
             </div>
           )}
+          {profile && profile.money < 500000 && (
+            <button onClick={() => router.push('/work')}
+              className="text-zinc-500 text-xs hover:text-yellow-400 transition-colors font-mono border border-zinc-700 hover:border-yellow-600 px-2 py-1 rounded">
+              ⛏ 労働
+            </button>
+          )}
           <button onClick={() => router.push('/settings')}
             className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors font-mono">
             設定

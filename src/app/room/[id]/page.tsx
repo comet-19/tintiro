@@ -7,14 +7,57 @@ import { useAuth } from '@/context/AuthContext';
 import { rollDice, resolveFinalHand, handStrength, handLabel, formatMoney } from '@/lib/game-logic';
 import type { Room, RoomPlayer, Round, Bet, Profile, DiceRoll, Hand } from '@/types/game';
 
-function DiceFace({ value }: { value: number }) {
+function playDiceRollSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const duration = 0.35;
+    const bufferSize = Math.floor(ctx.sampleRate * duration);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      const t = i / bufferSize;
+      data[i] = (Math.random() * 2 - 1) * (1 - t) * 0.4;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1200;
+    filter.Q.value = 0.8;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    source.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+    source.start(); source.stop(ctx.currentTime + duration);
+  } catch { /* ignore */ }
+}
+
+function playDiceLandSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    for (let k = 0; k < 3; k++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t = ctx.currentTime + k * 0.05;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180 - k * 20, t);
+      osc.frequency.exponentialRampToValueAtTime(80, t + 0.12);
+      gain.gain.setValueAtTime(0.3 - k * 0.08, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.15);
+    }
+  } catch { /* ignore */ }
+}
+
+function DiceFace({ value, animate = false }: { value: number; animate?: boolean }) {
   const dots: Record<number, [number, number][]> = {
     1: [[50,50]], 2: [[25,25],[75,75]], 3: [[25,25],[50,50],[75,75]],
     4: [[25,25],[75,25],[25,75],[75,75]], 5: [[25,25],[75,25],[50,50],[25,75],[75,75]],
     6: [[25,25],[75,25],[25,50],[75,50],[25,75],[75,75]],
   };
   return (
-    <div className="relative w-12 h-12 bg-white rounded-lg shadow-lg border border-zinc-200">
+    <div className={`relative w-12 h-12 bg-white rounded-lg shadow-lg border border-zinc-200 ${animate ? 'animate-diceLand' : ''}`}>
       <svg viewBox="0 0 100 100" className="w-full h-full">
         {(dots[value] ?? []).map(([cx, cy], i) => <circle key={i} cx={cx} cy={cy} r="9" fill="#1a1a1a" />)}
       </svg>
@@ -22,13 +65,31 @@ function DiceFace({ value }: { value: number }) {
   );
 }
 
-function DiceRow({ dice, rolling }: { dice: DiceRoll | null; rolling: boolean }) {
+function DiceRow({ dice, rolling, animate = false }: { dice: DiceRoll | null; rolling: boolean; animate?: boolean }) {
+  const [rollingFaces, setRollingFaces] = useState<[number, number, number]>([1, 3, 5]);
+
+  useEffect(() => {
+    if (!rolling) return;
+    const id = setInterval(() => {
+      setRollingFaces([
+        Math.ceil(Math.random() * 6),
+        Math.ceil(Math.random() * 6),
+        Math.ceil(Math.random() * 6),
+      ] as [number, number, number]);
+    }, 80);
+    return () => clearInterval(id);
+  }, [rolling]);
+
   return (
     <div className="flex gap-2 justify-center items-center min-h-12">
       {rolling
-        ? [0,1,2].map(i => <div key={i} className="w-12 h-12 bg-zinc-700 rounded-lg animate-pulse" />)
+        ? rollingFaces.map((v, i) => (
+            <div key={i} className="animate-diceRoll" style={{ animationDelay: `${i * 30}ms` }}>
+              <DiceFace value={v} />
+            </div>
+          ))
         : dice
-          ? dice.map((v, i) => <DiceFace key={i} value={v} />)
+          ? dice.map((v, i) => <DiceFace key={i} value={v} animate={animate} />)
           : [0,1,2].map(i => <div key={i} className="w-12 h-12 bg-zinc-800 rounded-lg border border-zinc-700" />)
       }
     </div>
@@ -214,7 +275,9 @@ export default function RoomPage() {
       const newRolls = [...localRolls, rollDice()];
       const lastDice = newRolls[newRolls.length - 1];
       setShowDice(null);
-      await new Promise(r => setTimeout(r, 300));
+      playDiceRollSound();
+      await new Promise(r => setTimeout(r, 500));
+      playDiceLandSound();
       setShowDice(lastDice);
 
       const hand = resolveFinalHand(newRolls);
@@ -325,7 +388,7 @@ export default function RoomPage() {
                 <div className="bg-zinc-800 rounded-xl p-4 flex flex-col items-center gap-3">
                   {isBanker && isMyTurnToRoll ? (
                     <>
-                      <DiceRow dice={showDice} rolling={isRolling} />
+                      <DiceRow dice={showDice} rolling={isRolling} animate={!isRolling && !!showDice} />
                       {localRolls.length > 0 && !isRolling && <p className="text-zinc-500 text-xs font-mono">目なし — あと{3 - localRolls.length}回振れます</p>}
                       <button onClick={performRoll} disabled={isRolling} className="px-6 py-2.5 bg-yellow-500 text-black rounded-lg font-bold text-sm hover:bg-yellow-400 disabled:opacity-50">
                         {isRolling ? '振り中...' : localRolls.length === 0 ? 'サイコロを振る' : '振り直す'}
@@ -382,7 +445,7 @@ export default function RoomPage() {
                     {/* 自分のロールターン */}
                     {isMe && isMyTurnToRoll && childBet && !childBet.rolls && (
                       <div className="mt-3 flex flex-col items-center gap-2">
-                        <DiceRow dice={showDice} rolling={isRolling} />
+                        <DiceRow dice={showDice} rolling={isRolling} animate={!isRolling && !!showDice} />
                         {localRolls.length > 0 && !isRolling && <p className="text-zinc-500 text-xs font-mono">目なし — あと{3 - localRolls.length}回</p>}
                         <button onClick={performRoll} disabled={isRolling} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-500 disabled:opacity-50">
                           {isRolling ? '...' : localRolls.length === 0 ? 'サイコロを振る' : '振り直す'}
