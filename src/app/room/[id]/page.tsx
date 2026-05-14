@@ -401,7 +401,7 @@ export default function RoomPage() {
               <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
                 <span>1万</span><span className="text-yellow-400">{formatMoney(betAmount)}</span>
               </div>
-              <input type="range" min={10000} max={Math.min(profile?.money ?? 10000, 500000)} step={10000} value={betAmount} onChange={e => setBetAmount(Number(e.target.value))} className="w-full accent-yellow-400" />
+              <input type="range" min={10000} max={profile?.money ?? 10000} step={10000} value={betAmount} onChange={e => setBetAmount(Number(e.target.value))} className="w-full accent-yellow-400" />
               <div className="grid grid-cols-3 gap-1">
                 {[10000, 50000, 100000].map(v => (
                   <button key={v} onClick={() => setBetAmount(v)} className="py-1 text-xs rounded bg-zinc-800 border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-mono">{v/10000}万</button>
@@ -458,7 +458,7 @@ export default function RoomPage() {
 
           <div className="mt-auto border border-zinc-800 rounded-xl p-3">
             <p className="text-xs font-semibold text-zinc-500 mb-2 font-mono">役の強さ（強い順）</p>
-            {[['ピンゾロ','1-1-1','2倍'],['ゾロ目','x-x-x','6→2'],['シゴロ','4-5-6',''],['目あり','ペア+目',''],['目なし','3回失敗',''],['ヒフミ','1-2-3','最弱']].map(([n,d,note]) => (
+            {[['ピンゾロ','1-1-1','5倍'],['ゾロ目','x-x-x','3倍'],['シゴロ','4-5-6','2倍'],['目あり','ペア+目','1倍'],['目なし','3回失敗','1倍'],['ヒフミ','1-2-3','負け×2倍']].map(([n,d,note]) => (
               <div key={n} className="flex items-center justify-between py-1 border-b border-zinc-900 last:border-0">
                 <span className="text-xs text-zinc-300">{n}</span>
                 <span className="text-xs text-zinc-600 font-mono">{d}{note ? ` (${note})` : ''}</span>

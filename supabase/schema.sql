@@ -105,9 +105,11 @@ language plpgsql
 security definer
 as $$
 declare
-  v_round rounds%rowtype;
-  v_bet   bets%rowtype;
-  v_multiplier int;
+  v_round        rounds%rowtype;
+  v_bet          bets%rowtype;
+  v_banker_mult  int;
+  v_player_mult  int;
+  v_total_mult   int;
 begin
   select * into v_round from rounds where id = p_round_id;
 
@@ -115,17 +117,36 @@ begin
     raise exception 'Only the banker can settle the round';
   end if;
 
+  -- 親の役倍率: ピンゾロ=5, ゾロ目=3, シゴロ=2, それ以外=1
+  v_banker_mult := case v_round.banker_hand
+    when 'pinzoro' then 5
+    when 'zoro'    then 3
+    when 'shigoro' then 2
+    else 1
+  end;
+
   for v_bet in select * from bets where round_id = p_round_id loop
-    v_multiplier := case when v_round.banker_hand = 'pinzoro' then 2 else 1 end;
+    -- 子の役倍率: ピンゾロ=5, ゾロ目=3, シゴロ=2, ヒフミ=2(負け時ペナルティ), それ以外=1
+    v_player_mult := case v_bet.hand
+      when 'pinzoro' then 5
+      when 'zoro'    then 3
+      when 'shigoro' then 2
+      when 'hifumi'  then 2
+      else 1
+    end;
 
     if v_bet.hand_value > v_round.banker_hand_value then
+      -- 子の勝ち: 子の役倍率 × 親の役倍率
+      v_total_mult := v_player_mult * v_banker_mult;
       update bets set result = 'win', settled_at = now() where id = v_bet.id;
-      update profiles set money = money + v_bet.amount   where id = v_bet.player_id;
-      update profiles set money = money - v_bet.amount   where id = v_round.banker_id;
+      update profiles set money = money + v_bet.amount * v_total_mult where id = v_bet.player_id;
+      update profiles set money = money - v_bet.amount * v_total_mult where id = v_round.banker_id;
     elsif v_bet.hand_value < v_round.banker_hand_value then
+      -- 親の勝ち: 親の役倍率 × 子のヒフミペナルティ(ヒフミ=2, それ以外=1)
+      v_total_mult := v_banker_mult * (case when v_bet.hand = 'hifumi' then 2 else 1 end);
       update bets set result = 'lose', settled_at = now() where id = v_bet.id;
-      update profiles set money = money + v_bet.amount * v_multiplier where id = v_round.banker_id;
-      update profiles set money = money - v_bet.amount * v_multiplier where id = v_bet.player_id;
+      update profiles set money = money + v_bet.amount * v_total_mult where id = v_round.banker_id;
+      update profiles set money = money - v_bet.amount * v_total_mult where id = v_bet.player_id;
     else
       update bets set result = 'draw', settled_at = now() where id = v_bet.id;
     end if;
