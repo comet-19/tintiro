@@ -124,8 +124,12 @@ export default function RoomPage() {
   const [showDice, setShowDice] = useState<DiceRoll | null>(null);
   const [settling, setSettling] = useState(false);
   const [roundResult, setRoundResult] = useState<Map<string, 'win' | 'lose' | 'draw'> | null>(null);
+  const [animatingPlayers, setAnimatingPlayers] = useState<Set<string>>(new Set());
+  const [bankerAnimating, setBankerAnimating] = useState(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const nextRoundCalledRef = useRef(false);
+  const prevBetsRef = useRef<Bet[]>([]);
+  const prevBankerHandRef = useRef<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     const [roomRes, playersRes] = await Promise.all([
@@ -224,6 +228,34 @@ export default function RoomPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextRoundCountdown]);
+
+  // 他プレイヤーがサイコロを振ったことを検知してアニメーションをトリガー
+  useEffect(() => {
+    if (prevBetsRef.current.length === 0) { prevBetsRef.current = bets; return; }
+    const newlyRolled = bets.filter(bet => {
+      if (bet.player_id === user?.id) return false;
+      const prev = prevBetsRef.current.find(p => p.id === bet.id);
+      return (bet.rolls?.length ?? 0) > (prev?.rolls?.length ?? 0);
+    });
+    if (newlyRolled.length > 0) {
+      const ids = new Set(newlyRolled.map(b => b.player_id));
+      setAnimatingPlayers(prev => new Set([...prev, ...ids]));
+      setTimeout(() => setAnimatingPlayers(prev => { const n = new Set(prev); ids.forEach(id => n.delete(id)); return n; }), 600);
+    }
+    prevBetsRef.current = bets;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bets]);
+
+  // 親（自分以外）がサイコロを振ったことを検知
+  useEffect(() => {
+    const hand = round?.banker_hand ?? null;
+    if (!isBanker && hand && hand !== prevBankerHandRef.current) {
+      setBankerAnimating(true);
+      setTimeout(() => setBankerAnimating(false), 600);
+    }
+    prevBankerHandRef.current = hand;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.banker_hand]);
 
   const myPlayer = players.find(p => p.player_id === user?.id) ?? null;
   const banker = players.find(p => room && p.seat_index === room.current_banker_seat) ?? null;
@@ -396,8 +428,8 @@ export default function RoomPage() {
                     </>
                   ) : round?.banker_hand ? (
                     <>
-                      <DiceRow dice={round.banker_rolls?.[round.banker_rolls.length - 1] ?? null} rolling={false} />
-                      <HandBadge hand={{ type: round.banker_hand, value: round.banker_hand_value ?? undefined }} />
+                      <DiceRow dice={round.banker_rolls?.[round.banker_rolls.length - 1] ?? null} rolling={bankerAnimating} animate={!bankerAnimating} />
+                      {!bankerAnimating && <HandBadge hand={{ type: round.banker_hand, value: round.banker_hand_value ?? undefined }} />}
                     </>
                   ) : (
                     <p className="text-zinc-600 text-sm font-mono py-2">待機中...</p>
@@ -429,7 +461,7 @@ export default function RoomPage() {
                         {childBet ? (
                           <>
                             <span className="text-xs font-mono text-zinc-400">{formatMoney(childBet.amount)}</span>
-                            {childBet.rolls && <DiceRow dice={childBet.rolls[childBet.rolls.length - 1]} rolling={false} />}
+                            {childBet.rolls && (() => { const anim = animatingPlayers.has(child.player_id); return <DiceRow dice={childBet.rolls[childBet.rolls.length - 1]} rolling={anim} animate={!anim} />; })()}
                             {childBet.hand && <HandBadge hand={{ type: childBet.hand, value: childBet.hand_value ?? undefined }} result={result} />}
                             {result && (
                               <span className={`text-xs font-bold ${result === 'win' ? 'text-green-400' : result === 'lose' ? 'text-red-400' : 'text-zinc-400'}`}>
