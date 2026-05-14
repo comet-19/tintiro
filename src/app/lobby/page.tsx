@@ -146,9 +146,9 @@ export default function LobbyPage() {
               <p className="text-yellow-400 text-xs font-mono">{formatMoney(profile.money)}</p>
             </div>
           )}
-          <button onClick={async () => { await signOut(); router.replace('/login'); }}
+          <button onClick={() => router.push('/settings')}
             className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors font-mono">
-            ログアウト
+            設定
           </button>
         </div>
       </header>
