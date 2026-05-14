@@ -53,6 +53,8 @@ export default function RoomPage() {
   const [round, setRound] = useState<Round | null>(null);
   const [bets, setBets] = useState<Bet[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
+  const [settleCountdown, setSettleCountdown] = useState<number | null>(null);
+  const [nextRoundCountdown, setNextRoundCountdown] = useState<number | null>(null);
   const [error, setError] = useState('');
 
   const [betAmount, setBetAmount] = useState(10000);
@@ -96,6 +98,59 @@ export default function RoomPage() {
   useEffect(() => {
     if (profile && profile.money <= 0) router.replace('/work');
   }, [profile, router]);
+
+  const SETTLE_SECS = 10;
+  const NEXT_ROUND_SECS = 5;
+
+  // 精算カウントダウン開始
+  useEffect(() => {
+    if (round?.status === 'settling' && !roundResult) {
+      setSettleCountdown(SETTLE_SECS);
+    } else {
+      setSettleCountdown(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.status]);
+
+  // 精算カウントダウン進行
+  useEffect(() => {
+    if (settleCountdown === null || settleCountdown <= 0) return;
+    const t = setTimeout(() => setSettleCountdown(s => (s ?? 1) - 1), 1000);
+    return () => clearTimeout(t);
+  }, [settleCountdown]);
+
+  // 0になったら自動精算（親のみ）
+  useEffect(() => {
+    if (settleCountdown === 0 && !roundResult && isBanker && !settling) {
+      doSettle();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settleCountdown]);
+
+  // 結果表示後のカウントダウン開始
+  useEffect(() => {
+    if (roundResult && isBanker) {
+      setNextRoundCountdown(NEXT_ROUND_SECS);
+    } else {
+      setNextRoundCountdown(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!roundResult]);
+
+  // 次ラウンドカウントダウン進行
+  useEffect(() => {
+    if (nextRoundCountdown === null || nextRoundCountdown <= 0) return;
+    const t = setTimeout(() => setNextRoundCountdown(s => (s ?? 1) - 1), 1000);
+    return () => clearTimeout(t);
+  }, [nextRoundCountdown]);
+
+  // 0になったら自動次ラウンド（親のみ）
+  useEffect(() => {
+    if (nextRoundCountdown === 0 && roundResult && isBanker) {
+      nextRound();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextRoundCountdown]);
 
   const myPlayer = players.find(p => p.player_id === user?.id) ?? null;
   const banker = players.find(p => room && p.seat_index === room.current_banker_seat) ?? null;
@@ -364,16 +419,41 @@ export default function RoomPage() {
             </div>
           )}
 
-          {room.status === 'playing' && round?.status === 'settling' && isBanker && !roundResult && (
-            <button onClick={doSettle} disabled={settling} className="w-full py-3 bg-purple-600 text-white rounded-lg font-bold text-sm hover:bg-purple-500 disabled:opacity-50">
-              {settling ? '精算中...' : '精算する'}
-            </button>
-          )}
+          {room.status === 'playing' && round?.status === 'settling' && !roundResult && (() => {
+            const total = SETTLE_SECS;
+            const current = settleCountdown ?? total;
+            const size = 64;
+            const sw = 4;
+            const r = (size - sw) / 2;
+            const circ = 2 * Math.PI * r;
+            const offset = circ * (1 - current / total);
+            return (
+              <div className="flex flex-col items-center gap-3">
+                <div className="relative flex items-center justify-center">
+                  <svg width={size} height={size} className="-rotate-90">
+                    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#3f3f46" strokeWidth={sw} />
+                    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#a855f7" strokeWidth={sw}
+                      strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+                      style={{ transition: 'stroke-dashoffset 1s linear' }} />
+                  </svg>
+                  <span className="absolute text-white font-mono font-bold text-sm">{current}</span>
+                </div>
+                {isBanker && (
+                  <button onClick={doSettle} disabled={settling} className="w-full py-3 bg-purple-600 text-white rounded-lg font-bold text-sm hover:bg-purple-500 disabled:opacity-50">
+                    {settling ? '精算中...' : '今すぐ精算'}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {roundResult && isBanker && (
-            <button onClick={nextRound} className="w-full py-3 bg-zinc-700 text-white rounded-lg font-bold text-sm hover:bg-zinc-600">
-              次のラウンドへ →
-            </button>
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-zinc-500 text-xs font-mono">{nextRoundCountdown ?? 0}秒後に次のラウンドへ</p>
+              <button onClick={() => { setNextRoundCountdown(null); nextRound(); }} className="w-full py-3 bg-zinc-700 text-white rounded-lg font-bold text-sm hover:bg-zinc-600">
+                今すぐ次のラウンドへ →
+              </button>
+            </div>
           )}
 
           <div className="mt-auto border border-zinc-800 rounded-xl p-3">
