@@ -201,6 +201,10 @@ export default function RoomPage() {
   async function leaveRoom() {
     if (!myPlayer) return;
     await supabase.from('room_players').update({ is_active: false }).eq('id', myPlayer.id);
+    const { count } = await supabase.from('room_players').select('*', { count: 'exact', head: true }).eq('room_id', roomId).eq('is_active', true);
+    if ((count ?? 0) === 0) {
+      await supabase.from('rooms').update({ status: 'finished' }).eq('id', roomId);
+    }
     router.push('/lobby');
   }
 
@@ -221,7 +225,7 @@ export default function RoomPage() {
     <main className="min-h-screen bg-zinc-950 text-white flex flex-col">
       <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/lobby')} className="text-zinc-500 hover:text-zinc-300 text-xs font-mono">← ロビー</button>
+          <button onClick={leaveRoom} className="text-zinc-500 hover:text-zinc-300 text-xs font-mono">← ロビー</button>
           <span className="text-zinc-700">|</span>
           <h1 className="text-sm font-semibold">{room.name}</h1>
           {round && room.status === 'playing' && (

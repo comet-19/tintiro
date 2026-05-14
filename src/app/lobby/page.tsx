@@ -51,6 +51,17 @@ export default function LobbyPage() {
     return () => { supabase.removeChannel(ch); };
   }, [user, fetchRooms, fetchLeaderboard]);
 
+  function extractErrorMessage(err: unknown, fallback: string): string {
+    if (!err) return fallback;
+    if (typeof err === 'object') {
+      const e = err as Record<string, unknown>;
+      if (typeof e.message === 'string') return e.message;
+      if (typeof e.details === 'string') return e.details;
+      if (typeof e.hint === 'string') return e.hint;
+    }
+    return fallback;
+  }
+
   async function createRoom() {
     if (!user || !profile) return;
     setError('');
@@ -58,12 +69,12 @@ export default function LobbyPage() {
     try {
       const name = roomName.trim() || `${profile.username}のテーブル`;
       const { data: room, error: rErr } = await supabase.from('rooms').insert({ name, max_players: maxPlayers, created_by: user.id }).select().single();
-      if (rErr) throw rErr;
+      if (rErr) { setError(`rooms insert: ${rErr.message} (${rErr.code}) ${rErr.details ?? ''}`); return; }
       const { error: jErr } = await supabase.from('room_players').insert({ room_id: room.id, player_id: user.id, seat_index: 0 });
-      if (jErr) throw jErr;
+      if (jErr) { setError(`room_players insert: ${jErr.message} (${jErr.code}) ${jErr.details ?? ''}`); return; }
       router.push(`/room/${room.id}`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'ルーム作成に失敗しました');
+      setError(extractErrorMessage(err, 'ルーム作成に失敗しました'));
     } finally {
       setCreating(false);
     }
@@ -74,23 +85,42 @@ export default function LobbyPage() {
     setJoining(roomId);
     setError('');
     try {
-      const { data: existing } = await supabase.from('room_players').select('*').eq('room_id', roomId).eq('player_id', user.id).single();
-      if (existing) { router.push(`/room/${roomId}`); return; }
+      // Check if already have a row (active or inactive)
+      const { data: existing } = await supabase.from('room_players').select('id, is_active').eq('room_id', roomId).eq('player_id', user.id).maybeSingle();
+      if (existing) {
+        if (!existing.is_active) {
+          await supabase.from('room_players').update({ is_active: true }).eq('id', existing.id);
+        }
+        router.push(`/room/${roomId}`);
+        return;
+      }
 
-      const { data: seats } = await supabase.from('room_players').select('seat_index').eq('room_id', roomId).eq('is_active', true);
       const room = rooms.find(r => r.id === roomId);
       if (!room) throw new Error('ルームが見つかりません');
 
-      const taken = new Set(seats?.map(s => s.seat_index) ?? []);
-      let nextSeat = -1;
-      for (let i = 0; i < room.max_players; i++) { if (!taken.has(i)) { nextSeat = i; break; } }
-      if (nextSeat === -1) throw new Error('満席です');
+      // Query ALL rows (including inactive) to respect unique(room_id, seat_index) constraint
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { data: seats, error: seatsErr } = await supabase.from('room_players').select('seat_index').eq('room_id', roomId);
+        if (seatsErr) throw seatsErr;
 
-      const { error: jErr } = await supabase.from('room_players').insert({ room_id: roomId, player_id: user.id, seat_index: nextSeat });
-      if (jErr) throw jErr;
-      router.push(`/room/${roomId}`);
+        const taken = new Set((seats ?? []).map(s => s.seat_index));
+        let nextSeat = -1;
+        for (let i = 0; i < room.max_players; i++) { if (!taken.has(i)) { nextSeat = i; break; } }
+        if (nextSeat === -1) throw new Error('満席です');
+
+        const { error: jErr } = await supabase.from('room_players').insert({ room_id: roomId, player_id: user.id, seat_index: nextSeat });
+        if (!jErr) { router.push(`/room/${roomId}`); return; }
+
+        if (jErr.code === '23505') {
+          // player+room constraint = already in room
+          if (jErr.message.includes('room_id_player_id')) { router.push(`/room/${roomId}`); return; }
+          continue; // seat taken by race condition, retry
+        }
+        throw jErr;
+      }
+      throw new Error('座席の確保に失敗しました。もう一度お試しください');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '参加に失敗しました');
+      setError(extractErrorMessage(err, '参加に失敗しました'));
     } finally {
       setJoining(null);
     }
