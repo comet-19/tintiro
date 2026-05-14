@@ -64,6 +64,7 @@ export default function RoomPage() {
   const [settling, setSettling] = useState(false);
   const [roundResult, setRoundResult] = useState<Map<string, 'win' | 'lose' | 'draw'> | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const nextRoundCalledRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
     const [roomRes, playersRes] = await Promise.all([
@@ -96,8 +97,18 @@ export default function RoomPage() {
   }, [user, authLoading, roomId, fetchAll, router]);
 
   useEffect(() => {
-    if (profile && profile.money <= 0) router.replace('/work');
-  }, [profile, router]);
+    if (!profile || profile.money > 0 || !user) return;
+    (async () => {
+      const { data: rp } = await supabase.from('room_players').select('id').eq('room_id', roomId).eq('player_id', user.id).eq('is_active', true).maybeSingle();
+      if (rp) {
+        await supabase.from('room_players').update({ is_active: false }).eq('id', rp.id);
+        const { count } = await supabase.from('room_players').select('*', { count: 'exact', head: true }).eq('room_id', roomId).eq('is_active', true);
+        if ((count ?? 0) === 0) await supabase.from('rooms').update({ status: 'finished' }).eq('id', roomId);
+      }
+      router.replace('/work');
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.money]);
 
   const SETTLE_SECS = 10;
   const NEXT_ROUND_SECS = 5;
@@ -127,9 +138,10 @@ export default function RoomPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settleCountdown]);
 
-  // 結果表示後のカウントダウン開始
+  // 結果表示後のカウントダウン開始（全員）
   useEffect(() => {
-    if (roundResult && isBanker) {
+    if (roundResult) {
+      nextRoundCalledRef.current = false;
       setNextRoundCountdown(NEXT_ROUND_SECS);
     } else {
       setNextRoundCountdown(null);
@@ -144,9 +156,9 @@ export default function RoomPage() {
     return () => clearTimeout(t);
   }, [nextRoundCountdown]);
 
-  // 0になったら自動次ラウンド（親のみ）
+  // 0になったら自動次ラウンド（有効な親のみ）
   useEffect(() => {
-    if (nextRoundCountdown === 0 && roundResult && isBanker) {
+    if (nextRoundCountdown === 0 && roundResult && isEffectiveBanker) {
       nextRound();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,6 +167,9 @@ export default function RoomPage() {
   const myPlayer = players.find(p => p.player_id === user?.id) ?? null;
   const banker = players.find(p => room && p.seat_index === room.current_banker_seat) ?? null;
   const isBanker = myPlayer?.player_id === banker?.player_id;
+  // 親が離席済みの場合は最初の活動プレイヤーが代理で進行
+  const effectiveBankerId = banker?.player_id ?? players[0]?.player_id ?? null;
+  const isEffectiveBanker = myPlayer?.player_id === effectiveBankerId;
   const myBet = bets.find(b => b.player_id === user?.id);
   const children = players.filter(p => p.player_id !== banker?.player_id);
 
@@ -242,7 +257,8 @@ export default function RoomPage() {
   }
 
   async function nextRound() {
-    if (!room || !isBanker) return;
+    if (!room || nextRoundCalledRef.current) return;
+    nextRoundCalledRef.current = true;
     setRoundResult(null); setShowDice(null); setLocalRolls([]);
     const nextSeat = (room.current_banker_seat + 1) % players.length;
     const { data: updatedRoom } = await supabase.from('rooms').update({ current_banker_seat: nextSeat }).eq('id', room.id).select().single();
@@ -447,12 +463,14 @@ export default function RoomPage() {
             );
           })()}
 
-          {roundResult && isBanker && (
+          {roundResult && (
             <div className="flex flex-col items-center gap-3">
               <p className="text-zinc-500 text-xs font-mono">{nextRoundCountdown ?? 0}秒後に次のラウンドへ</p>
-              <button onClick={() => { setNextRoundCountdown(null); nextRound(); }} className="w-full py-3 bg-zinc-700 text-white rounded-lg font-bold text-sm hover:bg-zinc-600">
-                今すぐ次のラウンドへ →
-              </button>
+              {isEffectiveBanker && (
+                <button onClick={() => { setNextRoundCountdown(null); nextRound(); }} className="w-full py-3 bg-zinc-700 text-white rounded-lg font-bold text-sm hover:bg-zinc-600">
+                  今すぐ次のラウンドへ →
+                </button>
+              )}
             </div>
           )}
 
